@@ -45,11 +45,12 @@ def da_from_seg(s: torch.Tensor, L: torch.Tensor) -> torch.Tensor:
     return torch.repeat_interleave(s0, L)
 
 
-def a_from_raw_da(raw_da: torch.Tensor, T: int) -> torch.Tensor:
+def a_from_raw_da(raw_da: torch.Tensor, T: int, angle_0: torch.Tensor) -> torch.Tensor:
     raw_da0 = raw_da - raw_da.mean()
+    raw_angle_0 = torch.tan(angle_0)
     raw_a = torch.empty(T)
-    raw_a[0] = 0.0
-    raw_a[1:] = torch.cumsum(raw_da0, dim=0)
+    raw_a[0] = raw_angle_0
+    raw_a[1:] = torch.cumsum(raw_da0, dim=0) + raw_angle_0
     return torch.atan(raw_a)
 
 
@@ -96,10 +97,11 @@ class Policy:
         raw_da: torch.Tensor,
         T: int,
         w_cyc: float,
+        angle_0: torch.Tensor,
     ):
         with torch.no_grad():
             vx0 = torch.exp(log_vx0)
-            a = a_from_raw_da(raw_da, T)
+            a = a_from_raw_da(raw_da, T, angle_0)
             loss, mean_vy, mean_vx, cyc, vx_hist, vy_hist = loss_and_metrics(
                 vx0, vy0, a, w_cyc
             )
@@ -120,12 +122,13 @@ class Policy:
         cls, x: np.ndarray, T: int, pieces: int, L: torch.Tensor, w_cyc: float
     ):
         with torch.no_grad():
-            # x[0]=log(vx0), x[1]=vy0, x[2:]=segment slopes -> raw_da[t] for t=0..T-2
+            # x[0]=log(vx0), x[1]=vy0, x[2]=angle_0, x[3:]=segment slopes -> raw_da[t] for t=0..T-2
             log_vx0 = torch.tensor(float(x[0]))
             vy0 = torch.tensor(float(x[1]))
-            s = torch.tensor(x[2:], dtype=log_vx0.dtype)
+            angle_0 = torch.tensor(float(x[2]))
+            s = torch.tensor(x[3:], dtype=log_vx0.dtype)
             raw_da = da_from_seg(s, L)
-            return cls.from_raw(log_vx0, vy0, raw_da, T, w_cyc)
+            return cls.from_raw(log_vx0, vy0, raw_da, T, w_cyc, angle_0)
 
     def raw_da_for_gd(self):
         raw_a = np.tan(self.a).astype(float)
@@ -184,14 +187,15 @@ def plot_gd_hist(h: GDHist):
     ax1.legend(l1 + l2, n1 + n2, ncol=4, fontsize=8, loc="upper right")
 
     fig.tight_layout()
-    plt.show()
+    fig.savefig("gd_history.png")
+    plt.close(fig)
 
 
 def cma_stage(T: int, pieces: int, w_cyc: float, maxfevals: int, sigma: float):
     L = lens(T, pieces)
 
-    x0 = np.zeros(2 + pieces, dtype=float)
-    # x0[0]=log(vx0), x0[1]=vy0, x0[2:]=segment slopes
+    x0 = np.zeros(3 + pieces, dtype=float)
+    # x0[0]=log(vx0), x0[1]=vy0, x0[2]=angle_0, x0[3:]=segment slopes
     opts = {"maxfevals": maxfevals}
     es = cma.CMAEvolutionStrategy(x0, sigma, opts)
 
@@ -203,10 +207,11 @@ def cma_stage(T: int, pieces: int, w_cyc: float, maxfevals: int, sigma: float):
             with torch.no_grad():
                 log_vx0 = torch.tensor(float(x[0]))
                 vy0 = torch.tensor(float(x[1]))
-                s = torch.tensor(x[2:], dtype=log_vx0.dtype)
+                angle_0 = torch.tensor(float(x[2]))
+                s = torch.tensor(x[3:], dtype=log_vx0.dtype)
                 vx0 = torch.exp(log_vx0)
                 raw_da = da_from_seg(s, L)
-                a = a_from_raw_da(raw_da, T)
+                a = a_from_raw_da(raw_da, T, angle_0)
                 loss, _, _, _, _, _ = loss_and_metrics(vx0, vy0, a, w_cyc)
                 ys.append(float(loss.item()))
         es.tell(xs, ys)
@@ -227,9 +232,10 @@ def gd_stage(T: int, iters: int, lr: float, w_cyc: float, p0: Policy):
     raw_da_init = p0.raw_da_for_gd()
     log_vx0 = torch.nn.Parameter(torch.tensor(float(np.log(p0.vx0))))
     vy0 = torch.nn.Parameter(torch.tensor(float(p0.vy0)))
+    angle_0 = torch.nn.Parameter(torch.tensor(float(p0.a[0])))
     raw_da = torch.nn.Parameter(torch.tensor(raw_da_init))
 
-    optim = torch.optim.Adam([log_vx0, vy0, raw_da], lr=lr)
+    optim = torch.optim.Adam([log_vx0, vy0, angle_0, raw_da], lr=lr)
 
     vx0_hist = np.empty(iters, dtype=float)
     vy0_hist = np.empty(iters, dtype=float)
@@ -241,7 +247,7 @@ def gd_stage(T: int, iters: int, lr: float, w_cyc: float, p0: Policy):
         optim.zero_grad()
 
         vx0 = torch.exp(log_vx0)
-        a = a_from_raw_da(raw_da, T)
+        a = a_from_raw_da(raw_da, T, angle_0)
         loss, mean_vy, mean_vx, cyc, _, _ = loss_and_metrics(vx0, vy0, a, w_cyc)
 
         loss.backward()
@@ -259,7 +265,7 @@ def gd_stage(T: int, iters: int, lr: float, w_cyc: float, p0: Policy):
                 f"vx0 {vx0_hist[it]:.8f}  vy0 {vy0_hist[it]:.8f}  cyc {cyc_hist[it]:.3e}"
             )
 
-    p1 = Policy.from_raw(log_vx0.detach(), vy0.detach(), raw_da.detach(), T, w_cyc)
+    p1 = Policy.from_raw(log_vx0.detach(), vy0.detach(), raw_da.detach(), T, w_cyc, angle_0.detach())
     h = GDHist(
         vx0=vx0_hist, vy0=vy0_hist, a0=a0_hist, mean_vy=mean_vy_hist, cyc=cyc_hist
     )
