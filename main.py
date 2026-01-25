@@ -145,13 +145,13 @@ class GDHist:
     cyc: np.ndarray
 
 
-def plot_policy(p: Policy, title: str):
+def plot_policy(p: Policy, title: str, filename: str):
     print(
         f"{title}: mean(vy)={p.mean_vy:.8f}  mean(vx)={p.mean_vx:.8f}  vx0={p.vx0:.8f}  vy0={p.vy0:.8f}  cyc={p.cyc:.3e}"
     )
 
     t = np.arange(len(p.a))
-    plt.figure(figsize=(10, 4), dpi=300)
+    fig = plt.figure(figsize=(10, 4), dpi=300)
     plt.axhline(0.0, color="black", linestyle="--", linewidth=0.8)
     plt.plot(t, p.a, color="black", lw=1, label="a(t)")
     plt.plot(t, p.vy, color="tab:blue", lw=1, label="vy(t)")
@@ -164,10 +164,11 @@ def plot_policy(p: Policy, title: str):
     plt.title(title)
     plt.legend(ncol=4, fontsize=8)
     plt.tight_layout()
-    plt.show()
+    fig.savefig(filename)
+    plt.close(fig)
 
 
-def plot_gd_hist(h: GDHist):
+def plot_gd_hist(h: GDHist, filename: str):
     t = np.arange(len(h.vx0))
     fig, ax1 = plt.subplots(figsize=(10, 4), dpi=300)
     ax2 = ax1.twinx()
@@ -187,7 +188,7 @@ def plot_gd_hist(h: GDHist):
     ax1.legend(l1 + l2, n1 + n2, ncol=4, fontsize=8, loc="upper right")
 
     fig.tight_layout()
-    fig.savefig("gd_history.png")
+    fig.savefig(filename)
     plt.close(fig)
 
 
@@ -265,14 +266,16 @@ def gd_stage(T: int, iters: int, lr: float, w_cyc: float, p0: Policy):
                 f"vx0 {vx0_hist[it]:.8f}  vy0 {vy0_hist[it]:.8f}  cyc {cyc_hist[it]:.3e}"
             )
 
-    p1 = Policy.from_raw(log_vx0.detach(), vy0.detach(), raw_da.detach(), T, w_cyc, angle_0.detach())
+    p1 = Policy.from_raw(
+        log_vx0.detach(), vy0.detach(), raw_da.detach(), T, w_cyc, angle_0.detach()
+    )
     h = GDHist(
         vx0=vx0_hist, vy0=vy0_hist, a0=a0_hist, mean_vy=mean_vy_hist, cyc=cyc_hist
     )
     return p1, h
 
 
-T = 200
+T = 180
 
 pieces = 10
 cma_maxfevals = 10000
@@ -284,9 +287,9 @@ gd_lr = 0.001
 w_cyc_gd = 10.0
 
 p_cma = cma_stage(T, pieces, w_cyc_cma, cma_maxfevals, cma_sigma)
-plot_policy(p_cma, "Stage 1 (CMA-ES) optimum")
+plot_policy(p_cma, "Stage 1 (CMA-ES) optimum", "stage1_cma_optimum.png")
 
 p_gd, h_gd = gd_stage(T, gd_iters, gd_lr, w_cyc_gd, p_cma)
-plot_policy(p_gd, "Stage 2 (GD) optimum")
+plot_policy(p_gd, "Stage 2 (GD) optimum", "stage2_gd_optimum.png")
 
-plot_gd_hist(h_gd)
+plot_gd_hist(h_gd, "gd_history.png")
