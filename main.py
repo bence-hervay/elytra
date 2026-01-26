@@ -3,6 +3,8 @@ import torch
 import matplotlib.pyplot as plt
 import cma
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 
 def step_v(
@@ -192,12 +194,158 @@ def plot_gd_hist(h: GDHist, filename: str):
     plt.close(fig)
 
 
+def plot_vxvy_trajectory(p: Policy, filename: str):
+    """Plot vx,vy trajectory as small dots."""
+    vx = p.vx
+    vy = p.vy
+
+    fig = plt.figure(figsize=(8, 8), dpi=400)
+    ax = fig.add_subplot(111)
+    ax.scatter(vx, vy, s=1, c="blue")
+    ax.set_xlabel("vx")
+    ax.set_ylabel("vy")
+    ax.set_title("vx,vy Trajectory")
+    ax.grid(True, alpha=0.3)
+    ax.set_aspect("equal")
+    fig.savefig(filename, bbox_inches="tight", dpi=400)
+    plt.close(fig)
+
+
+def plot_angle_possibilities(p: Policy, filename: str, T: int):
+    """Plot 4x4 grid showing angle possibilities at every 10th step."""
+    vx = p.vx
+    vy = p.vy
+    a = p.a
+
+    # Select time steps (every 10th, up to 16 for 4x4 grid)
+    step_interval = 10
+    selected_steps = [i for i in range(0, min(T, 160), step_interval)][:16]
+
+    # Create figure with 4x4 grid
+    fig = plt.figure(figsize=(12, 12), dpi=400)
+    gs = fig.add_gridspec(4, 4, hspace=0.5, wspace=0.5)
+
+    # Sample angles for possibilities (from -pi/2 to pi/2)
+    n_angles = 100
+    angles_sample = np.linspace(-np.pi / 2, np.pi / 2, n_angles)
+
+    # Process each selected time step
+    for idx, t in enumerate(selected_steps):
+        if t >= len(vx) - 1:
+            continue
+
+        row = idx // 4
+        col = idx % 4
+        ax = fig.add_subplot(gs[row, col])
+
+        # Current state
+        vx_curr = vx[t]
+        vy_curr = vy[t]
+        a_curr = a[t]
+
+        # Compute next vx,vy for each sampled angle
+        vx_nexts_list: list[float] = []
+        vy_nexts_list: list[float] = []
+
+        vx_t = torch.tensor(float(vx_curr))
+        vy_t = torch.tensor(float(vy_curr))
+
+        for angle in angles_sample:
+            vx_next, vy_next = step_v(vx_t, vy_t, torch.tensor(float(angle)))
+            vx_nexts_list.append(float(vx_next.item()))
+            vy_nexts_list.append(float(vy_next.item()))
+
+        vx_nexts = np.array(vx_nexts_list)
+        vy_nexts = np.array(vy_nexts_list)
+
+        # Compute actual next state
+        vx_actual_next_t, vy_actual_next_t = step_v(
+            vx_t, vy_t, torch.tensor(float(a_curr))
+        )
+        vx_actual_next = float(vx_actual_next_t.item())
+        vy_actual_next = float(vy_actual_next_t.item())
+
+        # Normalize for visibility (include both current state and possibilities)
+        vx_all = np.concatenate([[vx_curr], vx_nexts])
+        vy_all = np.concatenate([[vy_curr], vy_nexts])
+
+        vx_range = vx_all.max() - vx_all.min()
+        vy_range = vy_all.max() - vy_all.min()
+        margin = 0.1
+
+        if vx_range > 0:
+            vx_min = vx_all.min() - margin * vx_range
+            vx_max = vx_all.max() + margin * vx_range
+        else:
+            vx_min = vx_curr - 0.1
+            vx_max = vx_curr + 0.1
+
+        if vy_range > 0:
+            vy_min = vy_all.min() - margin * vy_range
+            vy_max = vy_all.max() + margin * vy_range
+        else:
+            vy_min = vy_curr - 0.1
+            vy_max = vy_curr + 0.1
+
+        # Plot possibilities curve
+        ax.plot(vx_nexts, vy_nexts, "b-", linewidth=0.3, alpha=0.7)
+
+        # Mark original v
+        ax.scatter([vx_curr], [vy_curr], s=15, c="green", marker="o", zorder=5)
+
+        # Mark endpoints (min and max pitch)
+        min_pitch_idx = np.argmin(angles_sample)
+        max_pitch_idx = np.argmax(angles_sample)
+        ax.scatter(
+            [vx_nexts[min_pitch_idx]],
+            [vy_nexts[min_pitch_idx]],
+            s=25,
+            c="red",
+            marker="x",
+            linewidths=1,
+            zorder=6,
+        )
+        ax.scatter(
+            [vx_nexts[max_pitch_idx]],
+            [vy_nexts[max_pitch_idx]],
+            s=25,
+            c="purple",
+            marker="x",
+            linewidths=1,
+            zorder=6,
+        )
+
+        # Mark optimal angle (actual chosen)
+        ax.scatter(
+            [vx_actual_next],
+            [vy_actual_next],
+            s=40,
+            c="orange",
+            marker="x",
+            linewidths=1.5,
+            zorder=7,
+        )
+
+        ax.set_xlim(vx_min, vx_max)
+        ax.set_ylim(vy_min, vy_max)
+        ax.set_aspect("equal")
+        ax.set_xlabel("vx", fontsize=7)
+        ax.set_ylabel("vy", fontsize=7)
+        ax.set_title(f"t={t}", fontsize=8)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=6)
+
+    fig.suptitle("Angle Possibilities at Selected Time Steps", fontsize=12, y=0.995)
+    fig.savefig(filename, bbox_inches="tight", dpi=400)
+    plt.close(fig)
+
+
 def cma_stage(T: int, pieces: int, w_cyc: float, maxfevals: int, sigma: float):
     L = lens(T, pieces)
 
     x0 = np.zeros(3 + pieces, dtype=float)
     # x0[0]=log(vx0), x0[1]=vy0, x0[2]=angle_0, x0[3:]=segment slopes
-    opts = {"maxfevals": maxfevals}
+    opts = {"maxfevals": maxfevals, "seed": 1}
     es = cma.CMAEvolutionStrategy(x0, sigma, opts)
 
     last_print = -1
@@ -275,21 +423,26 @@ def gd_stage(T: int, iters: int, lr: float, w_cyc: float, p0: Policy):
     return p1, h
 
 
-T = 180
+T = 160
 
 pieces = 10
 cma_maxfevals = 10000
 cma_sigma = 0.5
 w_cyc_cma = 10.0
 
-gd_iters = 3000
+gd_iters = 2000
 gd_lr = 0.001
 w_cyc_gd = 10.0
 
+output_dir = Path("outputs") / datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+output_dir.mkdir(parents=True, exist_ok=True)
+
 p_cma = cma_stage(T, pieces, w_cyc_cma, cma_maxfevals, cma_sigma)
-plot_policy(p_cma, "Stage 1 (CMA-ES) optimum", "stage1_cma_optimum.png")
+plot_policy(p_cma, "Stage 1 (CMA-ES) optimum", str(output_dir / "cma_optimum.png"))
 
 p_gd, h_gd = gd_stage(T, gd_iters, gd_lr, w_cyc_gd, p_cma)
-plot_policy(p_gd, "Stage 2 (GD) optimum", "stage2_gd_optimum.png")
+plot_policy(p_gd, "Stage 2 (GD) optimum", str(output_dir / "gd_optimum.png"))
 
-plot_gd_hist(h_gd, "gd_history.png")
+plot_gd_hist(h_gd, str(output_dir / "gd_history.png"))
+plot_vxvy_trajectory(p_gd, str(output_dir / "vxvy_trajectory.png"))
+plot_angle_possibilities(p_gd, str(output_dir / "angle_possibilities.png"), T)
