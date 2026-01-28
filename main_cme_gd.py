@@ -104,7 +104,7 @@ class Policy:
         T: int,
         w_cyc: float,
         angle_0: torch.Tensor,
-    ) -> Policy:
+    ) -> "Policy":
         with torch.no_grad():
             vx0 = torch.exp(log_vx0)
             a = a_from_raw_da(raw_da, T, angle_0)
@@ -126,7 +126,7 @@ class Policy:
     @classmethod
     def from_cma_x(
         cls, x: np.ndarray, T: int, pieces: int, L: torch.Tensor, w_cyc: float
-    ) -> Policy:
+    ) -> "Policy":
         with torch.no_grad():
             # x[0]=log(vx0), x[1]=vy0, x[2]=angle_0, x[3:]=segment slopes -> raw_da[t] for t=0..T-2
             log_vx0 = torch.tensor(float(x[0]))
