@@ -56,7 +56,9 @@ def a_from_raw_da(raw_da: torch.Tensor, T: int, angle_0: torch.Tensor) -> torch.
     return torch.atan(raw_a)
 
 
-def sim(vx0: torch.Tensor, vy0: torch.Tensor, a: torch.Tensor):
+def sim(
+    vx0: torch.Tensor, vy0: torch.Tensor, a: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     vx = vx0
     vy = vy0
     vx_hist = torch.empty(len(a))
@@ -70,7 +72,9 @@ def sim(vx0: torch.Tensor, vy0: torch.Tensor, a: torch.Tensor):
 
 def loss_and_metrics(
     vx0: torch.Tensor, vy0: torch.Tensor, a: torch.Tensor, w_cyc: float
-):
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+]:
     vx_hist, vy_hist, vxT, vyT = sim(vx0, vy0, a)
     mean_vy = vy_hist.mean()
     mean_vx = vx_hist.mean()
@@ -100,7 +104,7 @@ class Policy:
         T: int,
         w_cyc: float,
         angle_0: torch.Tensor,
-    ):
+    ) -> Policy:
         with torch.no_grad():
             vx0 = torch.exp(log_vx0)
             a = a_from_raw_da(raw_da, T, angle_0)
@@ -122,7 +126,7 @@ class Policy:
     @classmethod
     def from_cma_x(
         cls, x: np.ndarray, T: int, pieces: int, L: torch.Tensor, w_cyc: float
-    ):
+    ) -> Policy:
         with torch.no_grad():
             # x[0]=log(vx0), x[1]=vy0, x[2]=angle_0, x[3:]=segment slopes -> raw_da[t] for t=0..T-2
             log_vx0 = torch.tensor(float(x[0]))
@@ -132,7 +136,7 @@ class Policy:
             raw_da = da_from_seg(s, L)
             return cls.from_raw(log_vx0, vy0, raw_da, T, w_cyc, angle_0)
 
-    def raw_da_for_gd(self):
+    def raw_da_for_gd(self) -> np.ndarray:
         raw_a = np.tan(self.a).astype(float)
         raw_da = (raw_a[1:] - raw_a[:-1]).astype(float)
         return raw_da
@@ -147,7 +151,7 @@ class GDHist:
     cyc: np.ndarray
 
 
-def plot_policy(p: Policy, title: str, filename: str):
+def plot_policy(p: Policy, title: str, filename: str) -> None:
     print(
         f"{title}: mean(vy)={p.mean_vy:.8f}  mean(vx)={p.mean_vx:.8f}  vx0={p.vx0:.8f}  vy0={p.vy0:.8f}  cyc={p.cyc:.3e}"
     )
@@ -170,7 +174,7 @@ def plot_policy(p: Policy, title: str, filename: str):
     plt.close(fig)
 
 
-def plot_gd_hist(h: GDHist, filename: str):
+def plot_gd_hist(h: GDHist, filename: str) -> None:
     t = np.arange(len(h.vx0))
     fig, ax1 = plt.subplots(figsize=(10, 4), dpi=300)
     ax2 = ax1.twinx()
@@ -194,7 +198,7 @@ def plot_gd_hist(h: GDHist, filename: str):
     plt.close(fig)
 
 
-def plot_vxvy_trajectory(p: Policy, filename: str):
+def plot_vxvy_trajectory(p: Policy, filename: str) -> None:
     """Plot vx,vy trajectory as small dots."""
     vx = p.vx
     vy = p.vy
@@ -211,7 +215,7 @@ def plot_vxvy_trajectory(p: Policy, filename: str):
     plt.close(fig)
 
 
-def plot_angle_possibilities(p: Policy, filename: str, T: int):
+def plot_angle_possibilities(p: Policy, filename: str, T: int) -> None:
     """Plot 4x4 grid showing angle possibilities at every 10th step."""
     vx = p.vx
     vy = p.vy
@@ -340,7 +344,9 @@ def plot_angle_possibilities(p: Policy, filename: str, T: int):
     plt.close(fig)
 
 
-def cma_stage(T: int, pieces: int, w_cyc: float, maxfevals: int, sigma: float):
+def cma_stage(
+    T: int, pieces: int, w_cyc: float, maxfevals: int, sigma: float
+) -> Policy:
     L = lens(T, pieces)
 
     x0 = np.zeros(3 + pieces, dtype=float)
@@ -377,7 +383,9 @@ def cma_stage(T: int, pieces: int, w_cyc: float, maxfevals: int, sigma: float):
     return Policy.from_cma_x(es.result.xbest, T, pieces, L, w_cyc)
 
 
-def gd_stage(T: int, iters: int, lr: float, w_cyc: float, p0: Policy):
+def gd_stage(
+    T: int, iters: int, lr: float, w_cyc: float, p0: Policy
+) -> tuple[Policy, GDHist]:
     raw_da_init = p0.raw_da_for_gd()
     log_vx0 = torch.nn.Parameter(torch.tensor(float(np.log(p0.vx0))))
     vy0 = torch.nn.Parameter(torch.tensor(float(p0.vy0)))

@@ -65,8 +65,8 @@ try:
 except Exception as e:  # pragma: no cover
     HAS_JAX = False
     JAX_IMPORT_ERROR = e
-    jax = None  # type: ignore
-    jnp = None  # type: ignore
+    jax = None
+    jnp = None
 
 
 ArrayLike = Union[np.ndarray, Sequence[float]]
@@ -78,7 +78,7 @@ ArrayLike = Union[np.ndarray, Sequence[float]]
 
 
 # --- Original recurrence (must be included verbatim) -------------------------
-def next_v(v, s):
+def next_v(v: np.ndarray, s: float) -> tuple[float, float]:
     assert -1 < s < 1
     vx, vy = v
     assert vx > 0
@@ -109,7 +109,7 @@ class CaseSpec:
     vy_nonneg: bool  # True => enforce vy>=0; False => enforce vy<0
     s_bounds: Tuple[float, float]  # numeric bounds used for optimization (lo, hi)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.case_id not in ("A", "B", "C", "D"):
             raise ValueError("case_id must be one of A/B/C/D")
 
@@ -184,7 +184,9 @@ def make_f_case_np(case: CaseSpec) -> Callable[[np.ndarray, float], np.ndarray]:
     return f
 
 
-def make_f_case_jax(case: CaseSpec) -> Optional[Callable]:
+def make_f_case_jax(
+    case: CaseSpec,
+) -> Optional[Callable[[np.ndarray, float], np.ndarray]]:
     """JAX dynamics with fixed branches (only if JAX is available)."""
     if not HAS_JAX:
         return None
@@ -192,7 +194,7 @@ def make_f_case_jax(case: CaseSpec) -> Optional[Callable]:
     y_on = case.y_on
     s_on = case.s_on
 
-    def f(v, s):
+    def f(v: np.ndarray, s: float) -> np.ndarray:
         vx, vy = v[0], v[1]
         c2 = 1.0 - s * s
         prev_vx = vx
@@ -244,9 +246,9 @@ def _call_user_stage_cost(
 ) -> float:
     """Call a user stage-cost hook; supports either (v,s,t) or (v,s,t,v_next)."""
     try:
-        return float(fn(v, s, t, v_next))  # type: ignore[misc]
+        return float(fn(v, s, t, v_next))
     except TypeError:
-        return float(fn(v, s, t))  # type: ignore[misc]
+        return float(fn(v, s, t))
 
 
 ###############################################################################
@@ -361,8 +363,8 @@ class Differentiator:
         f_np: Callable[[np.ndarray, float], np.ndarray],
         ell_np: Callable[[np.ndarray, float, int], float],
         spec: DifferentiationSpec,
-        f_jax: Optional[Callable] = None,
-        ell_jax: Optional[Callable] = None,
+        f_jax: Optional[Callable[[np.ndarray, float], np.ndarray]] = None,
+        ell_jax: Optional[Callable[[np.ndarray, float, int], float]] = None,
     ):
         self.f_np = f_np
         self.ell_np = ell_np
@@ -566,7 +568,9 @@ class PMPSolver:
 
         return ell
 
-    def _make_ell_aug_jax(self, penalty_weight: float) -> Optional[Callable]:
+    def _make_ell_aug_jax(
+        self, penalty_weight: float
+    ) -> Optional[Callable[[np.ndarray, float, int], float]]:
         """JAX version of ℓ_aug(v,s,t) (only for built-in objectives)."""
         if not HAS_JAX or self.f_jax is None:
             return None
@@ -582,7 +586,7 @@ class PMPSolver:
         use_vy_next = bool(obj.use_vy_next)
         f_jax = self.f_jax
 
-        def ell(v, s, t):
+        def ell(v: np.ndarray, s: float, t: int) -> float:
             # base
             if not use_vy_next:
                 base = v[1]
@@ -933,8 +937,8 @@ class PMPSolver:
             v = np.zeros((N + 1, 2), dtype=np.float64)
             s = init_s.copy()
             lam = np.zeros((N + 1, 2), dtype=np.float64)
-            root_diag: Dict[str, Any] = {}
-            last_info: Dict[str, Any] = {}  # last inner FBSM diagnostics
+            root_diag = {}
+            last_info = {}  # last inner FBSM diagnostics
 
             t_start = time.perf_counter()
 
@@ -1094,7 +1098,7 @@ class PMPSolver:
             z0[2 * (k - 1) : 2 * (k - 1) + 2] = v_nom[seg_starts[k]]
         # λ boundaries start at zero; mu zero
 
-        def unpack(z: np.ndarray):
+        def unpack(z: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             z = np.asarray(z, dtype=np.float64)
             xb = z[:n_x].reshape((K - 1, 2)) if K > 1 else np.zeros((0, 2))
             lb = z[n_x : n_x + n_l].reshape((K - 1, 2)) if K > 1 else np.zeros((0, 2))
@@ -1364,25 +1368,27 @@ def print_result_summary(results: List[SolveResult]) -> pd.DataFrame:
         time_sec = float(d.get("wall_time_sec", 0.0))
         viol = int(d.get("vy_violations", 0))
         diff = str(d.get("diff_method", "?"))
-        data.append({
-            "case": r.case_id,
-            "success": "yes" if r.success else "no",
-            "obj": r.objective_value,
-            "obj_aug": r.objective_aug_value,
-            "term_err": term_err,
-            "vy_min": float(d.get("vy_min", np.nan)),
-            "vy_max": float(d.get("vy_max", np.nan)),
-            "s_min": float(d.get("s_min", np.nan)),
-            "s_max": float(d.get("s_max", np.nan)),
-            "viol": viol,
-            "time_sec": time_sec,
-            "diff": diff[:6],
-        })
-    
+        data.append(
+            {
+                "case": r.case_id,
+                "success": "yes" if r.success else "no",
+                "obj": r.objective_value,
+                "obj_aug": r.objective_aug_value,
+                "term_err": term_err,
+                "vy_min": float(d.get("vy_min", np.nan)),
+                "vy_max": float(d.get("vy_max", np.nan)),
+                "s_min": float(d.get("s_min", np.nan)),
+                "s_max": float(d.get("s_max", np.nan)),
+                "viol": viol,
+                "time_sec": time_sec,
+                "diff": diff[:6],
+            }
+        )
+
     df = pd.DataFrame(data)
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', None)
-    pd.set_option('display.max_colwidth', None)
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", None)
+    pd.set_option("display.max_colwidth", None)
     print("\n" + df.to_string(index=False))
     return df
 
@@ -1393,26 +1399,26 @@ def plot_optimum_all_cases(
     """Plot vx, vy, s curves in time for all cases (4 subplots) at the optimum."""
     # Sort results by case_id to ensure consistent order (A, B, C, D)
     results_sorted = sorted(results, key=lambda r: r.case_id)
-    
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=150)
     axes = axes.flatten()
-    
+
     for idx, res in enumerate(results_sorted):
         if idx >= 4:
             break
-        
+
         ax = axes[idx]
-        
+
         # Time arrays
         t_state = np.arange(res.N + 1)
         t_ctrl = np.arange(res.N)
-        
+
         # Get case info for interpretable labels
         case = CASE_SPECS[res.case_id]
         vy_label = "vy>=0" if case.vy_nonneg else "vy<0"
         s_label = "s<=0" if case.s_bounds[1] <= 0 else "s>0"
         title = f"Case {res.case_id}: {vy_label}, {s_label}\nobj={res.objective_value:.6g} | success={res.success}"
-        
+
         # Plot vx and vy on left y-axis
         ax.plot(t_state, res.vx, label="vx", color="tab:orange", linewidth=1.5)
         ax.plot(t_state, res.vy, label="vy", color="tab:blue", linewidth=1.5)
@@ -1421,20 +1427,22 @@ def plot_optimum_all_cases(
         ax.set_title(title, fontsize=11)
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper left", fontsize=9)
-        
+
         # Plot s on right y-axis
         ax2 = ax.twinx()
-        ax2.plot(t_ctrl, res.s, label="s", color="tab:green", linewidth=1.5, linestyle="--")
+        ax2.plot(
+            t_ctrl, res.s, label="s", color="tab:green", linewidth=1.5, linestyle="--"
+        )
         ax2.set_ylabel("s", fontsize=10, color="tab:green")
         ax2.tick_params(axis="y", labelcolor="tab:green")
         ax2.legend(loc="upper right", fontsize=9)
-    
+
     plt.tight_layout()
-    
+
     if save_path is not None:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Saved plot to {save_path}")
-    
+
     if show:
         plt.show()
     else:
@@ -1704,16 +1712,16 @@ def main() -> None:
 
     # Print summary as DataFrame
     print_result_summary(results)
-    
+
     # Create output directory and plot optimum results
     output_dir = Path("outputs") / datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Plot all cases at optimum
     plot_optimum_all_cases(
         results,
         save_path=str(output_dir / "pmp_optimum.png"),
-        show=False
+        show=False,
     )
 
 

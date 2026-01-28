@@ -10,6 +10,7 @@ dependencies = [
     "mypy>=1.19.1",
     "numpy>=2.4.1",
     "pandas>=3.0.0",
+    "pandas-stubs>=2.3.3.260113",
     "scipy>=1.17.0",
-    "torch>=2.10.0",
+    "scipy-stubs>=1.17.0.2",
 ]
