@@ -1,15 +1,15 @@
-from math import pi, cos, sin
-def next_v(v, a):
-    assert -pi / 2 < a < pi / 2
-    vx, vy = v
-    assert vx >= 0
-    c = cos(a); c2 = c * c
-    vx0 = vx; vy += 0.06 * c2 - 0.08
+def next_vx_vy(vx, vy, s):
+    assert vx >= 0 and -1 <= s <= 1
+    c2 = 1 - s * s
+    vx0 = vx
+    vy += 0.06 * c2 - 0.08
     if vy < 0:
-        t0 = 0.1 * vy * c2
-        vx -= t0; vy -= t0
-    if a < 0:
-        t1 = 0.04 * vx0 * sin(a)
-        vx += t1; vy -= 3.2 * t1
-    vx += (vx0 - vx) * 0.1
+        ty = 0.1 * vy * c2
+        vx -= ty
+        vy -= ty
+    if s > 0:
+        tx = 0.04 * vx0 * s
+        vx -= tx
+        vy += 3.2 * tx
+    vx += 0.1 * (vx0 - vx)
     return 0.99 * vx, 0.98 * vy
